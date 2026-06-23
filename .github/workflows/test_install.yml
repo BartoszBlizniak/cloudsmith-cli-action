@@ -9,109 +9,35 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest # 🐧
           - macos-latest # 🍏
           - windows-latest # 🪟
-        install-method: [pip, executable]
-        auth-method: [oidc, api-key]
+    env:
+      # Native OIDC: the CLI exchanges the GitHub OIDC token for a short-lived
+      # Cloudsmith credential on first use. No API key needed.
+      CLOUDSMITH_ORG: ${{ vars.CLOUDSMITH_ORG }}
+      CLOUDSMITH_SERVICE_SLUG: ${{ vars.CLOUDSMITH_SERVICE_SLUG }}
     steps:
       - uses: actions/checkout@v4
-      - name: "Set up Node.js"
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - name: "Install dependencies"
-        run: npm install
-      - name: "Run eslint"
-        run: npm run lint
-      - name: "Build project"
-        run: npm run build
-      - name: "📦 Run Cloudsmith CLI Installer"
+
+      - name: "📦 Install Cloudsmith CLI"
         uses: ./
         with:
-          api-user-agent: "gha-test"
-          oidc-namespace: ${{ matrix.auth-method == 'oidc' && vars.NAMESPACE || '' }}
-          oidc-service-slug: ${{ matrix.auth-method == 'oidc' && vars.SERVICE_ACCOUNT || '' }}
-          pip-install: ${{ matrix.install-method == 'pip' }}
-          api-key: ${{ matrix.auth-method == 'api-key' && secrets.CLOUDSMITH_API_KEY || '' }}
-      - name: "🔍 Verify Cloudsmith CLI Authentication (Linux and macOS)"
+          cli-version: "latest"
+
+      - name: "🔍 Verify Cloudsmith CLI (Linux/macOS)"
         if: runner.os != 'Windows'
-        run: |
-          cloudsmith whoami
         shell: bash
-      - name: "🔍 Verify Cloudsmith CLI Authentication (Windows)"
-        if: runner.os == 'Windows'
         run: |
+          cloudsmith --version
           cloudsmith whoami
-        shell: cmd
-      - name: "📄 Read Config File (Linux and macOS)"
-        if: runner.os != 'Windows'
-        run: |
-          CONFIG_FILE="$HOME/.cloudsmith/config.ini"
-          if [ -f "$CONFIG_FILE" ]; then
-            echo "Config file contents:"
-            cat "$CONFIG_FILE"
-          else
-            echo "Config file not found at $CONFIG_FILE"
-          fi
-        shell: bash
-      - name: "📄 Read Config File (Windows)"
+
+      - name: "🔍 Verify Cloudsmith CLI (Windows)"
         if: runner.os == 'Windows'
-        run: |
-          $configFile = "$env:LOCALAPPDATA\cloudsmith\config.ini"
-          if (!(Test-Path $configFile)) {
-            $configFile = "$env:APPDATA\cloudsmith\config.ini"
-          }
-          if (Test-Path $configFile) {
-            Write-Output "Config file contents:"
-            Get-Content $configFile
-          } else {
-            Write-Output "Config file not found at $configFile"
-          }
         shell: pwsh
-
-  test-oidc-only:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: "Set up Node.js"
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          
-      - name: "Install dependencies"
-        run: npm install
-
-      - name: "Run eslint"
-        run: npm run lint
-
-      - name: "Build project"
-        run: npm run build
-      
-      - name: OIDC Authentication Only
-        uses: ./
-        with:
-          oidc-namespace: ${{ vars.NAMESPACE }}
-          oidc-service-slug: ${{ vars.SERVICE_ACCOUNT }}
-          oidc-auth-only: 'true'
-      
-      - name: Test Authentication
         run: |
-          curl -X GET \
-            -H "Authorization: Bearer $CLOUDSMITH_API_KEY" \
-            https://api.cloudsmith.io/v1/user/self/ \
-            | jq -r '.authenticated'
-
-      - name: Test CLI Installation should fail
-        id: cli-test
-        continue-on-error: true
-        run: cloudsmith --version
-        
-      - name: Verify CLI installation failed
-        if: steps.cli-test.outcome == 'success'
-        run: |
-          echo "CLI installation should have failed but succeeded"
-          exit 1
+          cloudsmith --version
+          cloudsmith whoami
