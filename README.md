@@ -71,8 +71,19 @@ action.yml (composite)
                             extract onedir bundle → add to PATH → `whoami`
 ```
 
-The installer scripts ([`scripts/`](scripts/)) are the source of truth and are
-published to the Cloudsmith repo as raw packages (`install.sh`, `install.ps1`).
+The installer scripts (`install.sh`, `install.ps1`) are **not** vendored in this
+repo — they are hosted centrally on Cloudsmith as raw packages and downloaded at
+runtime. This keeps a single source of truth that other CI integrations
+(CircleCI, Azure Pipelines, …) consume the same way. The scripts implement a
+stable contract that every integration depends on:
+
+```
+flags: --repo OWNER/REPO   --version X.Y.Z|latest   --install-root DIR   --no-auth
+env:   CLOUDSMITH_API_KEY  |  CLOUDSMITH_ORG + CLOUDSMITH_SERVICE_SLUG (OIDC)
+```
+
+Override the script source per call via the `installer-url` / `installer-url-ps1`
+inputs (e.g. to pin a specific hosted version).
 
 ## License
 
