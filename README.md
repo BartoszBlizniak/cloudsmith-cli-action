@@ -1,133 +1,90 @@
-# Cloudsmith CLI Install Action
+# Cloudsmith CLI Setup Action
 
-[![Test Status](https://github.com/cloudsmith-io/cloudsmith-cli-action/actions/workflows/test_install.yml/badge.svg)](https://github.com/cloudsmith-io/cloudsmith-cli-action/actions/workflows/test_install.yml)
-[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Cloudsmith%20CLI%20Install-blue.svg?colorA=24292e&colorB=0366d6&style=flat&longCache=true&logo=github)](https://github.com/marketplace/actions/cloudsmith-cli-install-action)
-[![Node.js Version](https://img.shields.io/badge/node-24-brightgreen.svg)](https://nodejs.org/)
-[![License](https://img.shields.io/github/license/cloudsmith-io/cloudsmith-cli-action.svg)](LICENSE)
-[![Version](https://img.shields.io/github/v/release/cloudsmith-io/cloudsmith-cli-action.svg)](https://github.com/cloudsmith-io/cloudsmith-cli-action/releases)
+Install the [Cloudsmith CLI](https://github.com/cloudsmith-io/cloudsmith-cli) as a
+**standalone binary** in GitHub Actions. No Python, no `pip`, no zipapp. 🚀
 
-This GitHub Action installs the Cloudsmith CLI and pre-authenticates it using OIDC or API Key. 🚀
+> **v3 (PoC):** this action is now a thin **composite** action. It downloads a small
+> installer script hosted on a public Cloudsmith repo and runs it. The script detects
+> the runner host (Linux / macOS / Windows + arch + libc), resolves the matching
+> tagged release archive, downloads + extracts the prebuilt binary, puts `cloudsmith`
+> on `PATH`, and authenticates. All install/auth logic lives in the installer script —
+> the action just picks `install.sh` (bash) or `install.ps1` (pwsh) per runner OS.
 
-## ⚠️ Important Notices for v2
+## Usage
 
-**Breaking Changes:**
-- **Node.js 24 Required:** `@v2` requires Node.js 24 as a minimum. If you still rely on Node.js 20, please use `@v1` and plan for future migration.
-- **OIDC Audience Default Changed:** The default OIDC audience has changed from `api://AzureADTokenExchange` to `https://github.com/{org-name}` (using `GITHUB_REPOSITORY_OWNER`) for improved security. If you're using OIDC with audience claim validation, you may need to update your configuration or explicitly set `oidc-audience: 'api://AzureADTokenExchange'` to maintain the previous behavior.
+### Native OIDC (recommended)
 
-> **⚠️ Notice:** If you are running on self-hosted runners, Python version 3.9 or higher is required. Please ensure your runner meets this requirement to avoid any issues. We recommend using [setup-python](https://github.com/actions/setup-python) action for installing Python. 🐍
+The CLI exchanges the GitHub OIDC token for a short-lived Cloudsmith credential on
+first use — no API key stored anywhere.
 
+```yaml
+permissions:
+  id-token: write   # REQUIRED for OIDC
+  contents: read
+
+jobs:
+  example:
+    runs-on: ubuntu-latest   # also works on macos-* and windows-*
+    env:
+      CLOUDSMITH_ORG: your-namespace
+      CLOUDSMITH_SERVICE_SLUG: your-service-account-slug
+    steps:
+      - uses: BartoszBlizniak/cloudsmith-cli-action@v3-poc
+      - run: cloudsmith whoami
+```
+
+### API key
+
+```yaml
+jobs:
+  example:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
+    steps:
+      - uses: BartoszBlizniak/cloudsmith-cli-action@v3-poc
+      - run: cloudsmith whoami
+```
+
+Authentication is performed by the CLI itself (it reads `CLOUDSMITH_API_KEY`, or
+`CLOUDSMITH_ORG` + `CLOUDSMITH_SERVICE_SLUG` for native OIDC). The action does not
+handle credentials directly.
 
 ## Inputs
 
-### Authentication & Installation
+| Input               | Description                                                              | Default |
+|---------------------|--------------------------------------------------------------------------|---------|
+| `cli-version`       | Cloudsmith CLI version to install, e.g. `1.19.0`, or `latest`.           | `latest` |
+| `install-repo`      | Public Cloudsmith repo hosting the CLI binaries, as `OWNER/REPOSITORY`.  | `bart-demo-org-terraform/cli-binary-release-test` |
+| `installer-version` | Version of the installer-script package to download from Cloudsmith.     | `v0.0.2` |
+| `installer-url`     | Override: full URL to `install.sh` (Linux/macOS).                        | _(derived)_ |
+| `installer-url-ps1` | Override: full URL to `install.ps1` (Windows).                           | _(derived)_ |
 
-| Input                  | Description | Required | Default |
-|------------------------|-------------|----------|---------|
-| `cli-version` | Specific version of the Cloudsmith CLI to install | No | Latest |
-| `api-key` | API Key for Cloudsmith authentication | No | - |
-| `oidc-namespace` | Cloudsmith organisation/namespace for OIDC | No | - |
-| `oidc-service-slug` | Cloudsmith service account slug for OIDC | No | - |
-| `oidc-auth-only` | Only perform OIDC authentication without installing the CLI | No | `false` |
-| `oidc-auth-retry` | Number of retry attempts for OIDC authentication (0-10), 5 seconds delay between retries | No | `3` |
-| `oidc-audience` | Audience to request when retrieving the GitHub OIDC token. Defaults to `https://github.com/{org-name}` using GITHUB_REPOSITORY_OWNER. You can override with a custom value like `api://AzureADTokenExchange` if needed. | No | `https://github.com/{org-name}` (dynamic) |
-| `pip-install` | Install the Cloudsmith CLI via pip | No | - |
-| `executable-path` | Path to the Cloudsmith CLI executable | No | `GITHUB_WORKSPACE/bin/` |
+## How it works
 
-### CLI Configuration
-
-See [CLI configuration documentation](https://github.com/cloudsmith-io/cloudsmith-cli?tab=readme-ov-file#non-credentials-configini) for more details.
-
-| Input                  | Description | Required | Default |
-|------------------------|-------------|----------|---------|
-| `api-host` | API Host for Cloudsmith | No | - |
-| `api-proxy` | API Proxy for Cloudsmith | No | - |
-| `api-ssl-verify` | Verify SSL certificates for Cloudsmith API | No | - |
-| `api-user-agent` | User Agent for Cloudsmith API | No | - | 
-
-## Example Usage with OIDC
-
-Cloudsmith OIDC [documentation](https://docs.cloudsmith.com/authentication/openid-connect)
-
-```yaml
-uses: cloudsmith-io/cloudsmith-cli-action@v2
-with:
-  oidc-namespace: 'your-oidc-namespace'
-  oidc-service-slug: 'your-service-account-slug'
+```
+action.yml (composite)
+  ├─ Linux/macOS  ─ curl install.sh  | sh -s -- --repo <repo> --version <ver>
+  └─ Windows      ─ iwr  install.ps1 ; install.ps1 -Repo <repo> -Version <ver>
+                         │
+                         └─ detect host → resolve tagged archive → download +
+                            extract onedir bundle → add to PATH → `whoami`
 ```
 
-## Example Usage with API Key
+The installer scripts (`install.sh`, `install.ps1`) are **not** vendored in this
+repo — they are hosted centrally on Cloudsmith as raw packages and downloaded at
+runtime. This keeps a single source of truth that other CI integrations
+(CircleCI, Azure Pipelines, …) consume the same way. The scripts implement a
+stable contract that every integration depends on:
 
-Personal API Key can be found [here](https://cloudsmith.io/user/settings/api/). For CI-CD deployments we recommend using [Service Accounts](https://docs.cloudsmith.com/accounts-and-teams/service-accounts).
-
-```yaml
-uses: cloudsmith-io/cloudsmith-cli-action@v2
-with:
-  api-key: 'your-api-key'
+```
+flags: --repo OWNER/REPO   --version X.Y.Z|latest   --install-root DIR   --no-auth
+env:   CLOUDSMITH_API_KEY  |  CLOUDSMITH_ORG + CLOUDSMITH_SERVICE_SLUG (OIDC)
 ```
 
-## Example Usage with OIDC Authentication Only
-
-If you only need to authenticate with Cloudsmith's API without installing the CLI:
-
-```yaml
-uses: cloudsmith-io/cloudsmith-cli-action@v2
-with:
-  oidc-namespace: 'your-oidc-namespace'
-  oidc-service-slug: 'your-service-account-slug'
-  oidc-auth-only: 'true'
-```
-
-This will:
-- Perform OIDC authentication
-- Set the OIDC token as `CLOUDSMITH_API_KEY` environment variable
-- Skip CLI installation
-
-## Cloudsmith CLI Commands
-
-Full CLI feature list can be found [here](https://github.com/cloudsmith-io/cloudsmith-cli?tab=readme-ov-file#features)
-
-
-### Publish a package
-
-For all supported package formats and upload commands please visit our [Supported Formats](https://docs.cloudsmith.com/formats) page.
-
-```yaml
-name: Publish Python Package
-
-on:
-  push:
-    branches:
-      - main
-permissions:
-  id-token: write
-  contents: read
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Cloudsmith CLI
-        uses: cloudsmith-io/cloudsmith-cli-action@v2
-        with:
-          oidc-namespace: 'your-oidc-namespace'
-          oidc-service-slug: 'your-service-account-slug'
-
-      - name: Push package to Cloudsmith
-        run: |
-          cloudsmith push python your-namespace/your-repository dist/*.tar.gz
-```
-## Contribution
-
-Please check our [CONTRIBUTION](CONTRIBUTION.md) doc for more information. 🤝
+Override the script source per call via the `installer-url` / `installer-url-ps1`
+inputs (e.g. to pin a specific hosted version).
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 📄
-
-## Support
-
-If you have any questions or need further assistance, please open an issue on GitHub. We're here to help! Alternatively, you can contact us at [support.cloudsmith.com](https://support.cloudsmith.com/).
-
+MIT — see [LICENSE](LICENSE).
