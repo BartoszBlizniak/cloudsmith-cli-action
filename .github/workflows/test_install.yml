@@ -33,11 +33,18 @@ jobs:
         shell: bash
         run: |
           cloudsmith --version
-          cloudsmith whoami
+          out="$(cloudsmith whoami)"
+          echo "$out"
+          # whoami exits 0 even when anonymous; assert real authentication.
+          echo "$out" | grep -qi "anonymous" && { echo "::error::not authenticated (anonymous)"; exit 1; }
+          echo "$out" | grep -q "${{ vars.CLOUDSMITH_SERVICE_SLUG }}"
 
       - name: "🔍 Verify Cloudsmith CLI (Windows)"
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cloudsmith --version
-          cloudsmith whoami
+          $out = cloudsmith whoami | Out-String
+          Write-Host $out
+          if ($out -match "anonymous") { Write-Error "not authenticated (anonymous)"; exit 1 }
+          if ($out -notmatch "${{ vars.CLOUDSMITH_SERVICE_SLUG }}") { Write-Error "unexpected identity"; exit 1 }
